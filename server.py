@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 import socket
 import threading
 import time
@@ -53,16 +54,19 @@ class TCPServer:
         port: int = 44202,
         idle_timeout: float = 30.0,
         on_event: Optional[Callable[[str, dict], None]] = None,
+        history_path: Optional[str] = "connection_history.log",
     ):
         self.host = host
         self.port = port
         self.idle_timeout = idle_timeout
         self.on_event = on_event or (lambda event, payload: None)
+        self.history_path = history_path
 
         self._sock: Optional[socket.socket] = None
         self._clients: dict[str, ClientInfo] = {}
         self._client_sockets: dict[str, socket.socket] = {}
         self._lock = threading.Lock()
+        self._history_lock = threading.Lock()
         self._seq = itertools.count(1)
         self._running = False
         self.start_time: Optional[str] = None
@@ -98,6 +102,26 @@ class TCPServer:
     def snapshot(self) -> list[dict]:
         with self._lock:
             return [c.to_dict() for c in sorted(self._clients.values(), key=lambda c: c.connect_time)]
+
+    def load_history(self, limit: int = 500) -> list[dict]:
+        """Read persisted connect/disconnect records, most recent last. Survives server restarts."""
+        if not self.history_path:
+            return []
+        try:
+            with self._history_lock, open(self.history_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            return []
+        entries = []
+        for line in lines[-limit:]:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+        return entries
 
     def send_to_client(self, client_id: str, data: bytes) -> bool:
         with self._lock:
@@ -196,7 +220,27 @@ class TCPServer:
         return {"hex": hex_str, "text": text, "len": len(data), "truncated": len(data) > limit}
 
     def _emit(self, event: str, payload: dict) -> None:
+        if event in ("client_connected", "client_disconnected"):
+            self._append_history(event, payload)
         try:
             self.on_event(event, payload)
         except Exception:
+            pass
+
+    def _append_history(self, event: str, payload: dict) -> None:
+        if not self.history_path:
+            return
+        record = {
+            "time": now_iso(),
+            "event": event,
+            "client_id": payload.get("client_id"),
+            "ip": payload.get("ip"),
+            "port": payload.get("port"),
+            "connect_time": payload.get("connect_time"),
+            "disconnect_time": payload.get("disconnect_time"),
+        }
+        try:
+            with self._history_lock, open(self.history_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError:
             pass

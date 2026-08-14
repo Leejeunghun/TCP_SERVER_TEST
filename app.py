@@ -34,6 +34,11 @@ def api_clients():
     return jsonify(tcp_server.snapshot())
 
 
+@app.route("/api/history")
+def api_history():
+    return jsonify(tcp_server.load_history())
+
+
 @app.route("/api/send", methods=["POST"])
 def api_send():
     data = request.get_json(force=True) or {}
@@ -60,6 +65,16 @@ def main():
     )
     parser.add_argument("--web-host", default="0.0.0.0", help="Dashboard web host (default: 0.0.0.0)")
     parser.add_argument("--web-port", type=int, default=5000, help="Dashboard web port (default: 5000)")
+    parser.add_argument(
+        "--history-path",
+        default="connection_history.log",
+        help="Path to the persistent connect/disconnect history log (default: connection_history.log)",
+    )
+    parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="Disable persistent connect/disconnect history logging",
+    )
     args = parser.parse_args()
 
     global tcp_server
@@ -68,6 +83,7 @@ def main():
         port=args.port,
         idle_timeout=args.idle_timeout,
         on_event=handle_event,
+        history_path=None if args.no_history else args.history_path,
     )
     tcp_server.start()
 

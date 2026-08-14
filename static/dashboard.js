@@ -32,6 +32,7 @@ socket.on("snapshot", (list) => {
 socket.on("client_connected", (c) => {
   upsert(c);
   pushEvent("connected", c, `연결됨 (${c.ip}:${c.port})`);
+  loadHistory();
 });
 
 socket.on("client_update", (c) => {
@@ -50,6 +51,7 @@ socket.on("client_idle", (c) => {
 socket.on("client_disconnected", (c) => {
   upsert(c);
   pushEvent("disconnected", c, `연결 종료`);
+  loadHistory();
 });
 
 function fmtBytes(n) {
@@ -234,6 +236,38 @@ document.getElementById("clear-disconnected").addEventListener("click", () => {
 document.getElementById("clear-events").addEventListener("click", () => {
   eventLog.innerHTML = "";
 });
+
+const historyTbody = document.getElementById("history-tbody");
+const HISTORY_LABEL = { client_connected: "연결", client_disconnected: "끊김" };
+
+function renderHistory(entries) {
+  historyTbody.innerHTML = entries
+    .slice()
+    .reverse()
+    .map(
+      (e) => `
+        <tr>
+          <td>${e.time}</td>
+          <td><span class="badge ${e.event === "client_disconnected" ? "badge-red" : "badge-green"}">${
+            HISTORY_LABEL[e.event] || e.event
+          }</span></td>
+          <td>${e.ip}:${e.port}</td>
+          <td>${e.connect_time || "-"}</td>
+          <td>${e.disconnect_time || "-"}</td>
+        </tr>`
+    )
+    .join("");
+}
+
+function loadHistory() {
+  fetch("/api/history")
+    .then((r) => r.json())
+    .then(renderHistory)
+    .catch(() => {});
+}
+
+document.getElementById("refresh-history").addEventListener("click", loadHistory);
+loadHistory();
 
 // Tick only the idle-seconds cell every second, no DOM rebuild.
 setInterval(() => {
